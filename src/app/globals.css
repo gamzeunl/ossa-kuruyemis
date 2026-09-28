@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fffdf9;
+  --foreground: #2f2923;
+
+  --surface: #ffffff;
+  --surface-muted: #faf6ef;
+  --border-muted: #e9dfd2;
+
+  --brand-yellow: #ffb600;
+  --brand: var(--brand-yellow);
+  --brand-dark: #cc9100;
+  --brand-foreground: #4c3510;
+
+  --gold: var(--brand-yellow);
+  --gold-light: #f8e8bd;
+  --gold-foreground: #4c3510;
+
+  --muted-text: #756b62;
+
+  --brown: #5a3825;
+  --brown-dark: #3e281b;
+  --cream: #f7efe3;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border-muted: var(--border-muted);
+
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-foreground: var(--brand-foreground);
+
+  --color-gold: var(--gold);
+  --color-gold-light: var(--gold-light);
+  --color-gold-foreground: var(--gold-foreground);
+
+  --color-muted-text: var(--muted-text);
+
+  --color-brown: var(--brown);
+  --color-brown-dark: var(--brown-dark);
+  --color-cream: var(--cream);
+}
+
+/* Yatay scroll alanlarında (kategori/grup pill nav'ları) kaba scrollbar
+   göstermemek için — kaydırma işlevi korunur, yalnızca görsel çizgi gizlenir. */
+@utility hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* `justify-content: center` + taşan içerik, standart `scrollLeft` (0'ın altına
+   inemez) ile başlangıç tarafındaki taşan öğeleri KALICI OLARAK erişilemez
+   bırakır. `safe center`, içerik sığdığında ortalar; sığmadığında `start`'a
+   döner — böylece tüm öğeler her zaman kaydırılarak erişilebilir kalır
+   (bkz. `CategoryNav` masaüstü satırı). Tailwind'in yerleşik `justify-center`
+   yardımcı sınıfı bu değeri desteklemediği için ayrı bir utility olarak eklendi. */
+@utility justify-safe-center {
+  justify-content: safe center;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--background);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-manrope), Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+::selection {
+  background: var(--gold-light);
+  color: var(--foreground);
+}
+
+/* Kampanya rozetinde (yalnızca "discount") çok hafif, sürekli bir vurgu
+   halkası — dikkat çeker ama titretmez. */
+@keyframes badge-pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 182, 0, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 182, 0, 0);
+  }
+}
+
+/* Favori kalbi yeni işaretlendiğinde kısa, tek seferlik "pop". */
+@keyframes heart-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.35);
+  }
+  60% {
+    transform: scale(0.92);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* PDP ürün bilgisi accordion'ı açılırken hafif fade + kayma (yalnızca açılış — native
+   `<details>` kapanışta içeriği anında kaldırdığından JS'siz bir kapanış animasyonu
+   yapılamaz, bu kabul edilebilir bir sınırdır). */
+@keyframes accordion-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* PDP galerisinde aktif görsel değiştiğinde hafif fade-in (`key` ile yeniden mount edilen kapsayıcıda tetiklenir). */
+@keyframes gallery-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Kart hover-yükselmesi/görsel-zoom/CTA geçişleri dahil TÜM mikro hareketler
+   için TEK, global, kütüphanesiz erişilebilirlik kuralı — sistem düzeyinde
+   "hareketi azalt" tercih edilmişse geçiş/animasyon süreleri sıfıra yakın olur. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
