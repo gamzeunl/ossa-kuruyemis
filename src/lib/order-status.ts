@@ -32,3 +32,22 @@ export function canTransitionOrderStatus(from: OrderStatus, to: OrderStatus): bo
 export function getAvailableOrderStatusTransitions(from: OrderStatus): OrderStatus[] {
   return ALLOWED_TRANSITIONS[from];
 }
+
+/**
+ * Yalnızca doğrulanmış ödeme akışında kullanılacak durum geçişleri.
+ * Yönetici panelinin manuel durum değiştirme yetkilerini genişletmez.
+ */
+const PAYMENT_TRANSITIONS: Partial<Record<OrderStatus, OrderStatus[]>> = {
+  [OrderStatus.PENDING]: [OrderStatus.PAYMENT_PROCESSING],
+  [OrderStatus.PAYMENT_PROCESSING]: [
+    OrderStatus.PAID,
+    OrderStatus.PAYMENT_FAILED,
+  ],
+};
+
+export function canTransitionPaymentStatus(
+  from: OrderStatus,
+  to: OrderStatus,
+): boolean {
+  return PAYMENT_TRANSITIONS[from]?.includes(to) ?? false;
+}

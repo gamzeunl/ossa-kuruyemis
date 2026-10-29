@@ -378,25 +378,57 @@ export async function listRecommendedProducts(
  * mimari. `distinct` sayesinde bir üründe birden fazla indirimli varyant olsa
  * bile ürün yalnızca bir kez döner.
  */
+
 export async function listActiveDiscountedProductIds(limit: number): Promise<string[]> {
+  if (limit <= 0) return [];
+
   const now = new Date();
+
   const variants = await prisma.productVariant.findMany({
     where: {
-      isDiscountActive: true,
-      discountPrice: { not: null },
       isActive: true,
       product: { status: ProductStatus.ACTIVE },
-      AND: [
-        { OR: [{ discountStartsAt: null }, { discountStartsAt: { lte: now } }] },
-        { OR: [{ discountEndsAt: null }, { discountEndsAt: { gte: now } }] },
+      OR: [
+        {
+          isDiscountActive: true,
+          discountPrice: { not: null },
+          AND: [
+            {
+              OR: [
+                { discountStartsAt: null },
+                { discountStartsAt: { lte: now } },
+              ],
+            },
+            {
+              OR: [
+                { discountEndsAt: null },
+                { discountEndsAt: { gte: now } },
+              ],
+            },
+          ],
+        },
+        {
+          marketingCampaignProducts: {
+            some: {
+              campaignPrice: { not: null },
+              campaign: {
+                isActive: true,
+                startsAt: { lte: now },
+                endsAt: { gte: now },
+              },
+            },
+          },
+        },
       ],
     },
     select: { productId: true },
     distinct: ["productId"],
     take: limit * 3,
   });
+
   return variants.map((variant) => variant.productId);
 }
+
 
 /** Slug ile yayındaki bir ürünün tüm katalog ilişkilerini (görseller, varyantlar, kategoriler) getirir. */
 export async function findPublishedProductBySlug(slug: string): Promise<ProductDetailRow | null> {

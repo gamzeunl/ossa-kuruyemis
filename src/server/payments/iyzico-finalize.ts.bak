@@ -1,0 +1,111 @@
+import "server-only";
+
+import { prisma } from "@/server/db/prisma";
+import { consumeReservationsForOrder } from "@/server/repositories/inventory-repository";
+import { retrieveIyzicoPayment } from "./iyzico-checkout-retrieve";
+import { verifyIyzicoPayment } from "./iyzico-payment-verification";
+import { serverEnv } from "@/config/env";
+
+export async function finalizeIyzicoPayment(token: string) {
+  if (!token || token.length > 512) {
+    throw new Error("Geçersiz ödeme token'ı.");
+  }
+
+  const attempt = await prisma.paymentAttempt.findFirst({
+    where: { providerToken: token },
+    include: { payment: true, order: true },
+  });
+
+  if (!attempt || !attempt.payment) {
+    throw new Error("Ödeme denemesi bulunamadı.");
+  }
+
+  const result = await retrieveIyzicoPayment(token);
+
+  const providerPaymentId = verifyIyzicoPayment(result, {
+    conversationId: attempt.conversationId,
+    token,
+    amount: attempt.requestedAmount,
+    currency: attempt.payment.currency,
+    basketId: attempt.orderId,
+    secretKey: serverEnv.IYZICO_SECRET_KEY!,
+  });
+
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Order"
+      WHERE id = ${attempt.orderId}
+      FOR UPDATE
+    `;
+
+    const current = await tx.paymentAttempt.findUnique({
+      where: { id: attempt.id },
+      include: { payment: true, order: true },
+    });
+
+    if (!current || !current.payment) {
+      throw new Error("Ödeme kaydı bulunamadı.");
+    }
+
+    if (
+      current.providerToken !== token ||
+      current.conversationId !== attempt.conversationId ||
+      !current.requestedAmount.equals(attempt.requestedAmount) ||
+      current.payment.id !== attempt.paymentId
+    ) {
+      throw new Error("Ödeme kaydı doğrulama sırasında değişti.");
+    }
+
+    if (
+      current.status === "VERIFIED" &&
+      current.payment.status === "SUCCEEDED" &&
+      current.order.status === "PAID" &&
+      current.payment.providerPaymentId === providerPaymentId
+    ) {
+      return {
+        orderNumber: current.order.orderNumber,
+        alreadyProcessed: true,
+      };
+    }
+
+    if (
+      current.status !== "INITIATED" ||
+      current.payment.status !== "PENDING" ||
+      current.order.status !== "PAYMENT_PROCESSING"
+    ) {
+      throw new Error("Ödeme beklenmeyen durumda; manuel kontrol gerekli.");
+    }
+
+    if (
+      !current.payment.amount.equals(current.requestedAmount) ||
+      !current.order.grandTotal.equals(current.requestedAmount)
+    ) {
+      throw new Error("Sipariş ve ödeme tutarları eşleşmiyor.");
+    }
+
+    await consumeReservationsForOrder(current.orderId, tx);
+
+    await tx.payment.update({
+      where: { id: current.payment.id },
+      data: {
+        status: "SUCCEEDED",
+        providerPaymentId,
+      },
+    });
+
+    await tx.paymentAttempt.update({
+      where: { id: current.id },
+      data: { status: "VERIFIED" },
+    });
+
+    await tx.order.update({
+      where: { id: current.orderId },
+      data: { status: "PAID" },
+    });
+
+    return {
+      orderNumber: current.order.orderNumber,
+      alreadyProcessed: false,
+    };
+  });
+}

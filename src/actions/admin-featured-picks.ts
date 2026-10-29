@@ -26,16 +26,33 @@ function parseOptionalDate(value: string | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+
 function parseFormInput(formData: FormData) {
-  return featuredPickFormSchema.safeParse({
+  const parsed = featuredPickFormSchema.safeParse({
     productId: String(formData.get("productId") ?? ""),
     sortOrder: String(formData.get("sortOrder") ?? "0"),
     startsAt: String(formData.get("startsAt") ?? "").trim() || undefined,
     endsAt: String(formData.get("endsAt") ?? "").trim() || undefined,
   });
+
+  if (!parsed.success) {
+    return parsed;
+  }
+
+  return parsed;
 }
 
-function toFields(raw: { productId: string; sortOrder: number; startsAt?: string; endsAt?: string }, isActive: boolean): FeaturedPickFields {
+
+
+function toFields(
+  raw: {
+    productId: string;
+    sortOrder: number;
+    startsAt?: string;
+    endsAt?: string;
+  },
+  isActive: boolean
+): FeaturedPickFields {
   return {
     productId: raw.productId,
     sortOrder: raw.sortOrder,
@@ -44,6 +61,7 @@ function toFields(raw: { productId: string; sortOrder: number; startsAt?: string
     isActive,
   };
 }
+
 
 export async function createFeaturedPickAction(formData: FormData): Promise<AdminActionResult> {
   const admin = await betterAuthProvider.getCurrentUser();

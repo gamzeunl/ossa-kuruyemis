@@ -52,6 +52,7 @@ const serverEnvSchema = z.object({
   EMAIL_FROM: z.string().optional(),
   // Resend (`EMAIL_PROVIDER=resend`) — bkz. src/server/providers/resend-email-provider.ts.
   RESEND_API_KEY: z.string().optional(),
+  ORDER_NOTIFICATION_EMAIL: z.string().email().optional(),
   // Instagram Graph API ("Instagram API with Instagram Login") — @ossa.kuruyemis
   // hesabının kendi medyasını okumak için. Yalnızca kullanım noktasında
   // (src/server/providers/instagram-graph-api.ts) net bir hatayla zorunlu kılınır.

@@ -93,7 +93,14 @@ export async function releaseExpiredReservations(tx: Tx, variantIds: string[], n
     return;
   }
   const expired = await tx.stockReservation.findMany({
-    where: { variantId: { in: variantIds }, status: StockReservationStatus.ACTIVE, expiresAt: { lt: now } },
+    where: {
+      variantId: { in: variantIds },
+      status: StockReservationStatus.ACTIVE,
+      expiresAt: { lt: now },
+      order: {
+        status: { not: "PAYMENT_PROCESSING" },
+      },
+    },
     select: { id: true, variantId: true, quantity: true },
   });
   if (expired.length === 0) {
@@ -101,10 +108,13 @@ export async function releaseExpiredReservations(tx: Tx, variantIds: string[], n
   }
 
   for (const reservation of expired) {
-    await tx.stockReservation.update({
-      where: { id: reservation.id },
+    const updated = await tx.stockReservation.updateMany({
+      where: { id: reservation.id, status: StockReservationStatus.ACTIVE },
       data: { status: StockReservationStatus.EXPIRED, releasedAt: now },
     });
+      if (updated.count !== 1) {
+        throw new Error("Stok rezervasyonu eşzamanlı olarak değiştirildi.");
+      }
     await tx.inventory.update({
       where: { variantId: reservation.variantId },
       data: { quantityReserved: { decrement: reservation.quantity } },
@@ -162,10 +172,13 @@ export async function releaseReservationsForOrder(orderId: string, reason: strin
       select: { id: true, variantId: true, quantity: true },
     });
     for (const reservation of active) {
-      await client.stockReservation.update({
-        where: { id: reservation.id },
+      const updated = await client.stockReservation.updateMany({
+        where: { id: reservation.id, status: StockReservationStatus.ACTIVE },
         data: { status: StockReservationStatus.RELEASED, releasedAt: new Date() },
       });
+      if (updated.count !== 1) {
+        throw new Error("Stok rezervasyonu eşzamanlı olarak değiştirildi.");
+      }
       await client.inventory.update({
         where: { variantId: reservation.variantId },
         data: { quantityReserved: { decrement: reservation.quantity } },
@@ -201,13 +214,80 @@ export async function consumeReservationsForOrder(orderId: string, tx?: Tx): Pro
   const run = async (client: Tx) => {
     const active = await client.stockReservation.findMany({
       where: { orderId, status: StockReservationStatus.ACTIVE },
-      select: { id: true, variantId: true, quantity: true },
+      select: { id: true, variantId: true, quantity: true, expiresAt: true },
     });
+
+    const now = new Date();
+
+    const orderItems = await client.orderItem.findMany({
+      where: { orderId },
+      select: { variantId: true, quantity: true },
+    });
+
+    const allReservations = await client.stockReservation.findMany({
+      where: { orderId },
+      select: { status: true },
+    });
+
+    if (
+      orderItems.length === 0 ||
+      allReservations.length !== active.length
+    ) {
+      throw new Error("Siparişin stok rezervasyonları eksik veya geçersiz.");
+    }
+
+    const ordered = new Map<string, number>();
+    for (const item of orderItems) {
+      if (!item.variantId) {
+        throw new Error("Sipariş ürününün varyant bilgisi eksik.");
+      }
+      ordered.set(
+        item.variantId,
+        (ordered.get(item.variantId) ?? 0) + item.quantity,
+      );
+    }
+
+    const reserved = new Map<string, number>();
     for (const reservation of active) {
-      await client.stockReservation.update({
-        where: { id: reservation.id },
+      reserved.set(
+        reservation.variantId,
+        (reserved.get(reservation.variantId) ?? 0) + reservation.quantity,
+      );
+    }
+
+    if (
+      ordered.size !== reserved.size ||
+      [...ordered].some(
+        ([variantId, quantity]) => reserved.get(variantId) !== quantity,
+      )
+    ) {
+      throw new Error("Sipariş miktarları ile stok rezervasyonları eşleşmiyor.");
+    }
+
+    if (active.length === 0) {
+      throw new Error("Sipariş için aktif stok rezervasyonu bulunamadı.");
+    }
+
+    const order = await client.order.findUnique({
+      where: { id: orderId },
+      select: { status: true },
+    });
+
+    if (!order || (
+      order.status !== "PAYMENT_PROCESSING" &&
+      active.some((reservation) => reservation.expiresAt <= now)
+    )) {
+      throw new Error("Siparişin stok rezervasyon süresi dolmuş.");
+    }
+
+    for (const reservation of active) {
+      const updated = await client.stockReservation.updateMany({
+        where: { id: reservation.id, status: StockReservationStatus.ACTIVE },
         data: { status: StockReservationStatus.CONVERTED },
       });
+      if (updated.count !== 1) {
+        throw new Error("Stok rezervasyonu eşzamanlı olarak değiştirildi.");
+      }
       await client.inventory.update({
         where: { variantId: reservation.variantId },
         data: {

@@ -41,8 +41,14 @@ export function OrderResultView({ order, isLoggedIn = false, showStatusTimeline 
   return (
     <div className="flex flex-col gap-6">
       <div className="border-brand/30 bg-brand/5 rounded-2xl border p-6">
-        <p className="text-foreground text-lg font-bold">Sipariş talebiniz alındı.</p>
-        <p className="text-foreground/70 mt-1 text-sm">Ödeme işlemi henüz tamamlanmadı.</p>
+        <p className="text-foreground text-lg font-bold">
+          {order.status === "PAID" ? "Ödemeniz başarıyla alındı." : "Sipariş durumunuz"}
+        </p>
+        <p className="text-foreground/70 mt-1 text-sm">
+          {order.status === "PAID"
+            ? "Siparişiniz alındı ve ödemeniz onaylandı."
+            : "Ödemeniz henüz onaylanmadı. Sipariş durumunuzu aşağıdan takip edebilirsiniz."}
+        </p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

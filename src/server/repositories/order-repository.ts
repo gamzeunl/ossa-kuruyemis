@@ -19,7 +19,7 @@ import {
   type ShippingSettings,
 } from "@/lib/checkout-shipping";
 import { resolveBundleCompanionPrice } from "@/lib/bundle-pricing";
-import { resolveVariantPricing } from "@/lib/product-pricing";
+import { resolveVariantPricingWithCampaign } from "@/lib/marketing-campaign-pricing";
 import { violatesUniqueConstraintOn } from "@/lib/prisma-errors";
 import { computeReservationExpiry } from "@/lib/stock-reservation";
 import { prisma } from "@/server/db/prisma";
@@ -336,6 +336,41 @@ export async function createDraftOrder(
           throw new DraftOrderRejection("ITEM_NOT_FOUND");
         }
 
+const now = new Date();
+
+const campaignRows = await tx.marketingCampaignProduct.findMany({
+  where: {
+    variantId: { in: variantIds },
+    campaignPrice: { not: null },
+    campaign: {
+      isActive: true,
+      startsAt: { lte: now },
+      endsAt: { gte: now },
+    },
+  },
+  select: {
+    variantId: true,
+    campaignPrice: true,
+    campaign: {
+      select: {
+        isActive: true,
+        startsAt: true,
+        endsAt: true,
+      },
+    },
+  },
+});
+
+const campaignPrices = campaignRows.map((row) => ({
+  variantId: row.variantId,
+  campaignPrice: row.campaignPrice,
+  isActive: row.campaign.isActive,
+  startsAt: row.campaign.startsAt,
+  endsAt: row.campaign.endsAt,
+}));
+
+        
+
         // "Birlikte Daha Güzel" — client'ın gönderdiği TEK veri {variantId,quantity}
         // olduğu için (bkz. `delivery-form.tsx`), bundle eşleşmesi TAMAMEN sunucuda,
         // sepetteki (yukarıdaki) DB'den taze okunmuş varyantlar üzerinden kurulur.
@@ -369,7 +404,12 @@ export async function createDraftOrder(
             continue;
           }
 
-          const companionPricing = resolveVariantPricing(companionVariant);
+          const companionPricing = resolveVariantPricingWithCampaign(
+  companionVariant.id,
+  companionVariant,
+  campaignPrices,
+  now,
+);
           const resolved = resolveBundleCompanionPrice(companionPricing.effectivePrice, bundle);
           if (!resolved.isBundleApplied) {
             continue;
@@ -402,7 +442,12 @@ export async function createDraftOrder(
             throw new DraftOrderRejection("INSUFFICIENT_STOCK");
           }
 
-          const pricing = resolveVariantPricing(variant);
+        const pricing = resolveVariantPricingWithCampaign(
+  variant.id,
+  variant,
+  campaignPrices,
+  now,
+);  
           const bundleSegments = bundleSegmentsByVariantId.get(variant.id) ?? [];
           const bundleQuantity = bundleSegments.reduce((sum, segment) => sum + segment.quantity, 0);
           const remainderQuantity = quantity - bundleQuantity;
@@ -896,6 +941,12 @@ export async function updateOrderStatus(
   to: OrderStatus,
 ): Promise<UpdateOrderStatusResult> {
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Order"
+      WHERE id = ${orderId}
+      FOR UPDATE
+    `;
+
     const order = await tx.order.findUnique({ where: { id: orderId }, select: { status: true } });
     if (!order) {
       return { ok: false, reason: "ORDER_NOT_FOUND" };

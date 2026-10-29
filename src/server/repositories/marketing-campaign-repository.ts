@@ -1,11 +1,13 @@
-import type { MarketingCampaignType, Prisma } from "@/generated/prisma/client";
+
+import type {
+  MarketingCampaignType,
+  Prisma,
+} from "@/generated/prisma/client";
+
 import { prisma } from "@/server/db/prisma";
 
 /**
- * Admin listesi/formu ve storefront (homepage/popup) TÜMÜ bu aynı, ürün
- * ilişkisi dahil şekli kullanır — fiyat/aktiflik kararı burada YOK, çağıran
- * servis katmanı (`catalog-service.ts`) `resolveVariantPricing`/`campaign-status.ts`
- * ile karar verir, bu repository yalnızca veri toplar.
+ * Admin ve storefront için ortak kampanya sorgusu.
  */
 const marketingCampaignSelect = {
   id: true,
@@ -21,53 +23,92 @@ const marketingCampaignSelect = {
   sortOrder: true,
   createdAt: true,
   updatedAt: true,
+
   products: {
     select: {
       variantId: true,
       sortOrder: true,
+      campaignPrice: true,
+
       variant: {
         select: {
           id: true,
           name: true,
           productId: true,
-          product: { select: { id: true, name: true, slug: true } },
+
+          product: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
         },
       },
     },
-    orderBy: { sortOrder: "asc" },
+
+    orderBy: {
+      sortOrder: "asc",
+    },
   },
 } satisfies Prisma.MarketingCampaignSelect;
 
-export type MarketingCampaignRow = Prisma.MarketingCampaignGetPayload<{
-  select: typeof marketingCampaignSelect;
-}>;
+export type MarketingCampaignRow =
+  Prisma.MarketingCampaignGetPayload<{
+    select: typeof marketingCampaignSelect;
+  }>;
 
-/** Tüm kayıtlar (pasif/planlı/sona ermiş dahil) — admin "Kampanyalar" hub'ı. */
-export async function listMarketingCampaignsForAdmin(): Promise<MarketingCampaignRow[]> {
+/**
+ * Admin için tüm kampanyalar.
+ */
+export async function listMarketingCampaignsForAdmin(): Promise<
+  MarketingCampaignRow[]
+> {
   return prisma.marketingCampaign.findMany({
     select: marketingCampaignSelect,
-    orderBy: [{ sortOrder: "asc" }, { startsAt: "desc" }],
+    orderBy: [
+      { sortOrder: "asc" },
+      { startsAt: "desc" },
+    ],
   });
-}
-
-export async function findMarketingCampaignForAdmin(id: string): Promise<MarketingCampaignRow | null> {
-  return prisma.marketingCampaign.findUnique({ where: { id }, select: marketingCampaignSelect });
 }
 
 /**
- * Storefront (homepage/popup) için aday havuzu — nihai "şu an aktif mi"
- * kararı `isCampaignCurrentlyActive` ile servis katmanında verilir, burada
- * yalnızca `isActive=true` olanlar (pasif olanlar hiçbir zaman aday bile
- * olmaz) getirilir.
+ * Tek kampanyayı getir.
  */
-export async function listEnabledMarketingCampaigns(): Promise<MarketingCampaignRow[]> {
-  return prisma.marketingCampaign.findMany({
-    where: { isActive: true },
+export async function findMarketingCampaignForAdmin(
+  id: string
+): Promise<MarketingCampaignRow | null> {
+  return prisma.marketingCampaign.findUnique({
+    where: { id },
     select: marketingCampaignSelect,
-    orderBy: [{ sortOrder: "asc" }, { startsAt: "desc" }],
   });
 }
 
+/**
+ * Aktif olarak işaretlenmiş kampanyalar.
+ * Tarih kontrolü servis katmanında yapılır.
+ */
+export async function listEnabledMarketingCampaigns(): Promise<
+  MarketingCampaignRow[]
+> {
+  return prisma.marketingCampaign.findMany({
+    where: {
+      isActive: true,
+    },
+
+    select: marketingCampaignSelect,
+
+    orderBy: [
+      { sortOrder: "asc" },
+      { startsAt: "desc" },
+    ],
+  });
+}
+
+/**
+ * Kampanyanın temel alanları.
+ */
 export interface MarketingCampaignFields {
   name: string;
   type: MarketingCampaignType;
@@ -81,60 +122,208 @@ export interface MarketingCampaignFields {
   sortOrder: number;
 }
 
-function buildProductRelationOps(variantIds: string[]) {
-  return variantIds.map((variantId, index) => ({ variantId, sortOrder: index }));
+/**
+ * Yeni kampanya ürün/fiyat formatı.
+ */
+export interface MarketingCampaignProductInput {
+  variantId: string;
+  campaignPrice: string;
 }
 
-export async function createMarketingCampaign(
-  fields: MarketingCampaignFields,
-  variantIds: string[],
-): Promise<{ id: string }> {
-  return prisma.marketingCampaign.create({
-    data: {
-      ...fields,
-      products: { create: buildProductRelationOps(variantIds) },
-    },
-    select: { id: true },
+/**
+ * Eski testlerdeki string[] formatını da destekler.
+ *
+ * string:
+ *   "variant-id"
+ *
+ * Yeni format:
+ *   {
+ *     variantId: "variant-id",
+ *     campaignPrice: "249.90"
+ *   }
+ */
+type CampaignProductInput =
+  | MarketingCampaignProductInput
+  | string;
+
+/**
+ * Ürün ilişkilerini Prisma kayıt formatına dönüştürür.
+ *
+ * Eski formatta fiyat null olur.
+ * Yeni formatta kampanyalı fiyat kaydedilir.
+ */
+function buildProductRelationOps(
+  products: CampaignProductInput[]
+) {
+  return products.map((product, index) => {
+    if (typeof product === "string") {
+      return {
+        variantId: product,
+        campaignPrice: null,
+        sortOrder: index,
+      };
+    }
+
+    return {
+      variantId: product.variantId,
+      campaignPrice: product.campaignPrice,
+      sortOrder: index,
+    };
   });
 }
 
 /**
- * Kampanya alanları + ürün ilişkileri ATOMİK olarak güncellenir — mevcut
- * ilişkiler tamamen silinip seçilen listeyle yeniden yazılır (kısmi
- * ekleme/çıkarma karşılaştırması yapılmaz, form zaten TÜM seçili varyant
- * listesini gönderir).
+ * Yeni kampanya oluştur.
+ */
+export async function createMarketingCampaign(
+  fields: MarketingCampaignFields,
+  products: CampaignProductInput[]
+): Promise<{ id: string }> {
+  return prisma.marketingCampaign.create({
+    data: {
+      ...fields,
+
+      products: {
+        create: buildProductRelationOps(products),
+      },
+    },
+
+    select: {
+      id: true,
+    },
+  });
+}
+
+/**
+ * Kampanya bilgilerini ve ürün fiyatlarını
+ * tek transaction içinde günceller.
+ *
+ * Eski ilişkiler silinir ve seçili ürünler
+ * kampanya fiyatlarıyla yeniden oluşturulur.
  */
 export async function updateMarketingCampaign(
   id: string,
   fields: MarketingCampaignFields,
-  variantIds: string[],
+  products: CampaignProductInput[]
 ): Promise<void> {
   await prisma.$transaction([
-    prisma.marketingCampaignProduct.deleteMany({ where: { campaignId: id } }),
+    prisma.marketingCampaignProduct.deleteMany({
+      where: {
+        campaignId: id,
+      },
+    }),
+
     prisma.marketingCampaign.update({
-      where: { id },
+      where: {
+        id,
+      },
+
       data: {
         ...fields,
-        products: { create: buildProductRelationOps(variantIds) },
+
+        products: {
+          create: buildProductRelationOps(products),
+        },
       },
     }),
   ]);
 }
 
-export async function deactivateMarketingCampaign(id: string): Promise<void> {
-  await prisma.marketingCampaign.update({ where: { id }, data: { isActive: false } });
-}
+/**
+ * Kampanyayı pasifleştir.
+ */
+export async function deactivateMarketingCampaign(
+  id: string
+): Promise<void> {
+  await prisma.marketingCampaign.update({
+    where: {
+      id,
+    },
 
-export async function deleteMarketingCampaign(id: string): Promise<void> {
-  await prisma.marketingCampaign.delete({ where: { id } });
-}
-
-/** `/urunler?kampanya=` başlığı için hafif, salt-okunur kimlik bilgisi — ürün listesi ayrı sorguyla (`listProducts`) gelir. */
-export async function findMarketingCampaignBasicById(
-  id: string,
-): Promise<{ id: string; name: string; headline: string | null } | null> {
-  return prisma.marketingCampaign.findUnique({
-    where: { id },
-    select: { id: true, name: true, headline: true },
+    data: {
+      isActive: false,
+    },
   });
+}
+
+/**
+ * Kampanyayı sil.
+ */
+export async function deleteMarketingCampaign(
+  id: string
+): Promise<void> {
+  await prisma.marketingCampaign.delete({
+    where: {
+      id,
+    },
+  });
+}
+
+/**
+ * Kampanya başlığı için temel bilgiler.
+ */
+export async function findMarketingCampaignBasicById(
+  id: string
+): Promise<{
+  id: string;
+  name: string;
+  headline: string | null;
+} | null> {
+  return prisma.marketingCampaign.findUnique({
+    where: {
+      id,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      headline: true,
+    },
+  });
+}
+
+/**
+ * Verilen varyantların aktif kampanya fiyatlarını getirir.
+ * Aynı varyant birden fazla kampanyadaysa tüm adaylar döner.
+ * En düşük geçerli fiyatı seçme işlemi ortak fiyatlandırma
+ * fonksiyonunda yapılır.
+ */
+export async function listCampaignPricesForVariants(
+  variantIds: string[],
+  now: Date = new Date(),
+) {
+  if (variantIds.length === 0) {
+    return [];
+  }
+
+  const rows = await prisma.marketingCampaignProduct.findMany({
+    where: {
+      variantId: { in: variantIds },
+      campaignPrice: { not: null },
+      campaign: {
+        isActive: true,
+        startsAt: { lte: now },
+        endsAt: { gte: now },
+      },
+    },
+    select: {
+      variantId: true,
+      campaignPrice: true,
+      campaign: {
+        select: {
+          isActive: true,
+          startsAt: true,
+          endsAt: true,
+        },
+      },
+    },
+  });
+
+  return rows.map((row) => ({
+    variantId: row.variantId,
+    campaignPrice: row.campaignPrice,
+    isActive: row.campaign.isActive,
+    startsAt: row.campaign.startsAt,
+    endsAt: row.campaign.endsAt,
+  }));
 }

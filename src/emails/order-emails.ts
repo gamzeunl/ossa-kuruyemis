@@ -40,6 +40,7 @@ export interface RenderedOrderEmail {
 }
 
 const INTRO_TEXT: Record<OrderEmailType, string> = {
+  ADMIN_NEW_ORDER: "Yeni ödenmiş sipariş bildirimi.",
   ORDER_RECEIVED: "Siparişiniz alındı ve onayınızı bekliyor. Ödeme işlemi henüz tamamlanmadı.",
   STATUS_CONFIRMED: "Siparişiniz onaylandı, hazırlanmaya başlanacak.",
   STATUS_PROCESSING: "Siparişiniz hazırlanıyor.",
@@ -49,6 +50,7 @@ const INTRO_TEXT: Record<OrderEmailType, string> = {
 };
 
 const SUBJECT_TITLE: Record<OrderEmailType, string> = {
+  ADMIN_NEW_ORDER: "Yeni Sipariş Bildirimi",
   ORDER_RECEIVED: "Siparişiniz Alındı",
   STATUS_CONFIRMED: "Siparişiniz Onaylandı",
   STATUS_PROCESSING: "Siparişiniz Hazırlanıyor",

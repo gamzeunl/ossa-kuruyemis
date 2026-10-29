@@ -145,7 +145,28 @@ describe.skipIf(!hasTestDatabase)("inventory-repository (izole test DB)", () => 
 
   it("consumeReservationsForOrder ACTIVE rezervasyonu CONVERTED yapar, quantityAvailable VE quantityReserved birlikte azalır (gerçek satış)", async () => {
     const orderId = await createTestOrder();
-    await createReservation(sharedPrisma, { orderId, variantId, quantity: 5, expiresAt: new Date(Date.now() + 60_000) });
+
+    await sharedPrisma.orderItem.create({
+      data: {
+        orderId,
+        productId,
+        variantId,
+        productName: "Envanter Test",
+        variantName: "500 g",
+        sku: "INV-TEST-SALE",
+        quantity: 5,
+        regularUnitPrice: "100.00",
+        unitPrice: "100.00",
+        lineTotal: "500.00",
+      },
+    });
+
+    await createReservation(sharedPrisma, {
+      orderId,
+      variantId,
+      quantity: 5,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
 
     await consumeReservationsForOrder(orderId);
 

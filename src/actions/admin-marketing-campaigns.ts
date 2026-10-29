@@ -1,3 +1,4 @@
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -14,20 +15,37 @@ import {
   type MarketingCampaignFields,
 } from "@/server/repositories/marketing-campaign-repository";
 
-export type AdminActionResult = { ok: true } | { ok: false; message: string };
+export type AdminActionResult =
+  | { ok: true }
+  | { ok: false; message: string };
 
 const LIST_PATH = "/yonetim/kampanyalar";
 
 function parseFormInput(formData: FormData) {
+  const variantIds = formData
+    .getAll("variantIds")
+    .map((value) => String(value));
+
+  const campaignPrices: Record<string, string> = {};
+
+  for (const variantId of variantIds) {
+    campaignPrices[variantId] = String(
+      formData.get(`campaignPrice_${variantId}`) ?? ""
+    );
+  }
+
   return marketingCampaignFormSchema.safeParse({
     name: String(formData.get("name") ?? ""),
     type: String(formData.get("type") ?? ""),
     startsAt: String(formData.get("startsAt") ?? ""),
     endsAt: String(formData.get("endsAt") ?? ""),
-    headline: String(formData.get("headline") ?? "").trim() || undefined,
-    description: String(formData.get("description") ?? "").trim() || undefined,
+    headline:
+      String(formData.get("headline") ?? "").trim() || undefined,
+    description:
+      String(formData.get("description") ?? "").trim() || undefined,
     sortOrder: String(formData.get("sortOrder") ?? "0"),
-    variantIds: formData.getAll("variantIds").map((value) => String(value)),
+    variantIds,
+    campaignPrices,
   });
 }
 
@@ -43,7 +61,7 @@ function toFields(
   },
   isActive: boolean,
   showOnHomepage: boolean,
-  showPopup: boolean,
+  showPopup: boolean
 ): MarketingCampaignFields {
   return {
     name: parsed.name,
@@ -59,7 +77,10 @@ function toFields(
   };
 }
 
-function auditMetadata(fields: MarketingCampaignFields, productCount: number) {
+function auditMetadata(
+  fields: MarketingCampaignFields,
+  productCount: number
+) {
   return {
     name: fields.name,
     type: fields.type,
@@ -71,28 +92,60 @@ function auditMetadata(fields: MarketingCampaignFields, productCount: number) {
   };
 }
 
-export async function createMarketingCampaignAction(formData: FormData): Promise<AdminActionResult> {
+export async function createMarketingCampaignAction(
+  formData: FormData
+): Promise<AdminActionResult> {
   const admin = await betterAuthProvider.getCurrentUser();
+
   if (!admin || admin.role !== "ADMIN") {
-    return { ok: false, message: "Bu işlem için yetkiniz yok." };
+    return {
+      ok: false,
+      message: "Bu işlem için yetkiniz yok.",
+    };
   }
 
   const parsed = parseFormInput(formData);
+
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Girdi doğrulanamadı." };
+    return {
+      ok: false,
+      message:
+        parsed.error.issues[0]?.message ??
+        "Girdi doğrulanamadı.",
+    };
   }
 
   const isActive = formData.get("isActive") === "on";
-  const showOnHomepage = formData.get("showOnHomepage") === "on";
+  const showOnHomepage =
+    formData.get("showOnHomepage") === "on";
   const showPopup = formData.get("showPopup") === "on";
-  const fields = toFields(parsed.data, isActive, showOnHomepage, showPopup);
+
+  const fields = toFields(
+    parsed.data,
+    isActive,
+    showOnHomepage,
+    showPopup
+  );
 
   let createdId: string;
+
   try {
-    const campaign = await createMarketingCampaign(fields, parsed.data.variantIds);
+    // Repository henüz kampanyalı fiyatları kabul etmiyor.
+    // Sonraki adımda fiyatları da bu çağrıya ekleyeceğiz.
+    const campaign = await createMarketingCampaign(
+  fields,
+  parsed.data.variantIds.map((variantId) => ({
+    variantId,
+    campaignPrice: parsed.data.campaignPrices[variantId],
+  }))
+);
+
     createdId = campaign.id;
   } catch {
-    return { ok: false, message: "Kaydedilemedi." };
+    return {
+      ok: false,
+      message: "Kaydedilemedi.",
+    };
   }
 
   await recordAuditLog({
@@ -100,41 +153,80 @@ export async function createMarketingCampaignAction(formData: FormData): Promise
     action: "CAMPAIGN_CREATED",
     entityType: "MarketingCampaign",
     entityId: createdId,
-    metadata: auditMetadata(fields, parsed.data.variantIds.length),
+    metadata: auditMetadata(
+      fields,
+      parsed.data.variantIds.length
+    ),
   });
 
   revalidatePath("/");
+
   redirect(`${LIST_PATH}/${createdId}`);
 }
 
 export async function updateMarketingCampaignAction(
   campaignId: string,
-  formData: FormData,
+  formData: FormData
 ): Promise<AdminActionResult> {
   const admin = await betterAuthProvider.getCurrentUser();
+
   if (!admin || admin.role !== "ADMIN") {
-    return { ok: false, message: "Bu işlem için yetkiniz yok." };
+    return {
+      ok: false,
+      message: "Bu işlem için yetkiniz yok.",
+    };
   }
 
-  const existing = await findMarketingCampaignForAdmin(campaignId);
+  const existing = await findMarketingCampaignForAdmin(
+    campaignId
+  );
+
   if (!existing) {
-    return { ok: false, message: "Kampanya bulunamadı." };
+    return {
+      ok: false,
+      message: "Kampanya bulunamadı.",
+    };
   }
 
   const parsed = parseFormInput(formData);
+
   if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "Girdi doğrulanamadı." };
+    return {
+      ok: false,
+      message:
+        parsed.error.issues[0]?.message ??
+        "Girdi doğrulanamadı.",
+    };
   }
 
   const isActive = formData.get("isActive") === "on";
-  const showOnHomepage = formData.get("showOnHomepage") === "on";
+  const showOnHomepage =
+    formData.get("showOnHomepage") === "on";
   const showPopup = formData.get("showPopup") === "on";
-  const fields = toFields(parsed.data, isActive, showOnHomepage, showPopup);
+
+  const fields = toFields(
+    parsed.data,
+    isActive,
+    showOnHomepage,
+    showPopup
+  );
 
   try {
-    await updateMarketingCampaign(campaignId, fields, parsed.data.variantIds);
+    // Repository güncellendiğinde kampanyalı fiyatları
+    // da bu çağrıya ekleyeceğiz.
+    await updateMarketingCampaign(
+  campaignId,
+  fields,
+  parsed.data.variantIds.map((variantId) => ({
+    variantId,
+    campaignPrice: parsed.data.campaignPrices[variantId],
+  }))
+);
   } catch {
-    return { ok: false, message: "Kaydedilemedi." };
+    return {
+      ok: false,
+      message: "Kaydedilemedi.",
+    };
   }
 
   await recordAuditLog({
@@ -142,29 +234,51 @@ export async function updateMarketingCampaignAction(
     action: "CAMPAIGN_UPDATED",
     entityType: "MarketingCampaign",
     entityId: campaignId,
-    metadata: auditMetadata(fields, parsed.data.variantIds.length),
+    metadata: auditMetadata(
+      fields,
+      parsed.data.variantIds.length
+    ),
   });
 
   revalidatePath("/");
+
   return { ok: true };
 }
 
-/** "Pasif" yap — silmez, `isActive=false`. Storefront'ta anında gizlenir (`isCampaignCurrentlyActive` TEK karar kaynağı). */
-export async function deactivateMarketingCampaignAction(campaignId: string): Promise<AdminActionResult> {
+/**
+ * Kampanyayı pasif yapar.
+ * Kayıt silinmez, yalnızca isActive=false olur.
+ */
+export async function deactivateMarketingCampaignAction(
+  campaignId: string
+): Promise<AdminActionResult> {
   const admin = await betterAuthProvider.getCurrentUser();
+
   if (!admin || admin.role !== "ADMIN") {
-    return { ok: false, message: "Bu işlem için yetkiniz yok." };
+    return {
+      ok: false,
+      message: "Bu işlem için yetkiniz yok.",
+    };
   }
 
-  const existing = await findMarketingCampaignForAdmin(campaignId);
+  const existing = await findMarketingCampaignForAdmin(
+    campaignId
+  );
+
   if (!existing) {
-    return { ok: false, message: "Kampanya bulunamadı." };
+    return {
+      ok: false,
+      message: "Kampanya bulunamadı.",
+    };
   }
 
   try {
     await deactivateMarketingCampaign(campaignId);
   } catch {
-    return { ok: false, message: "Güncellenemedi." };
+    return {
+      ok: false,
+      message: "Güncellenemedi.",
+    };
   }
 
   await recordAuditLog({
@@ -176,24 +290,40 @@ export async function deactivateMarketingCampaignAction(campaignId: string): Pro
 
   revalidatePath("/");
   revalidatePath(LIST_PATH);
+
   return { ok: true };
 }
 
-export async function deleteMarketingCampaignAction(campaignId: string): Promise<AdminActionResult> {
+export async function deleteMarketingCampaignAction(
+  campaignId: string
+): Promise<AdminActionResult> {
   const admin = await betterAuthProvider.getCurrentUser();
+
   if (!admin || admin.role !== "ADMIN") {
-    return { ok: false, message: "Bu işlem için yetkiniz yok." };
+    return {
+      ok: false,
+      message: "Bu işlem için yetkiniz yok.",
+    };
   }
 
-  const existing = await findMarketingCampaignForAdmin(campaignId);
+  const existing = await findMarketingCampaignForAdmin(
+    campaignId
+  );
+
   if (!existing) {
-    return { ok: false, message: "Kampanya bulunamadı." };
+    return {
+      ok: false,
+      message: "Kampanya bulunamadı.",
+    };
   }
 
   try {
     await deleteMarketingCampaign(campaignId);
   } catch {
-    return { ok: false, message: "Silinemedi." };
+    return {
+      ok: false,
+      message: "Silinemedi.",
+    };
   }
 
   await recordAuditLog({
@@ -204,5 +334,6 @@ export async function deleteMarketingCampaignAction(campaignId: string): Promise
   });
 
   revalidatePath("/");
+
   redirect(LIST_PATH);
 }

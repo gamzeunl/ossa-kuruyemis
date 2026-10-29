@@ -1,0 +1,104 @@
+import "server-only";
+
+import { Prisma } from "@/generated/prisma/client";
+import { parseOrderAddressSnapshot } from "@/lib/order-address-snapshot";
+import { validateIyzicoAmount } from "./iyzico-amount";
+
+type CheckoutOrder = {
+  id: string;
+  orderNumber: string;
+  email: string;
+  phone: string;
+  currency: string;
+  grandTotal: Prisma.Decimal;
+  shippingTotal: Prisma.Decimal | null;
+  items: {
+    id: string;
+    productName: string;
+    variantName: string;
+    quantity: number;
+    lineTotal: Prisma.Decimal;
+  }[];
+  shippingAddressSnapshot: Prisma.JsonValue;
+  billingAddressSnapshot: Prisma.JsonValue;
+};
+
+export function buildIyzicoCheckoutData(order: CheckoutOrder) {
+  if (order.currency !== "TRY") {
+    throw new Error("iyzico için yalnızca TRY destekleniyor.");
+  }
+
+  const paidPrice = validateIyzicoAmount(order);
+
+  const shipping = parseOrderAddressSnapshot(
+    order.shippingAddressSnapshot,
+  );
+  const billing = parseOrderAddressSnapshot(
+    order.billingAddressSnapshot,
+  );
+
+  if (!shipping || !billing) {
+    throw new Error("Sipariş adres bilgileri geçersiz.");
+  }
+
+  if (order.items.length === 0) {
+    throw new Error("Siparişte ürün bulunamadı.");
+  }
+
+  const basketItems = order.items.map((item) => {
+    if (item.quantity <= 0 || item.lineTotal.lte(0)) {
+      throw new Error("Siparişte geçersiz ürün tutarı var.");
+    }
+
+    return {
+      id: item.id,
+      name: `${item.productName} ${item.variantName}`.trim(),
+      category1: "Kuruyemiş",
+      itemType: "PHYSICAL",
+      price: item.lineTotal.toFixed(2),
+    };
+  });
+
+  const price = order.items
+    .reduce(
+      (sum, item) => sum.add(item.lineTotal),
+      new Prisma.Decimal(0),
+    )
+    .toFixed(2);
+
+  return {
+    paidPrice,
+    price,
+    basketItems,
+    buyer: {
+      id: order.id,
+      name: billing.firstName,
+      surname: billing.lastName,
+      gsmNumber: order.phone,
+      email: order.email,
+      registrationAddress: billing.addressLine,
+      city: billing.city,
+      country: "Turkey",
+    },
+    shippingAddress: {
+      contactName: `${shipping.firstName} ${shipping.lastName}`,
+      city: shipping.city,
+      country: "Turkey",
+      address: [
+        shipping.neighborhood,
+        shipping.addressLine,
+        shipping.district,
+      ].filter(Boolean).join(", "),
+    },
+    billingAddress: {
+      contactName: `${billing.firstName} ${billing.lastName}`,
+      city: billing.city,
+      country: "Turkey",
+      address: [
+        billing.neighborhood,
+        billing.addressLine,
+        billing.district,
+      ].filter(Boolean).join(", "),
+    },
+  };
+}

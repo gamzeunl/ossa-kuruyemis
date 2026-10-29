@@ -186,7 +186,6 @@ interface DeliveryFormProps {
 export function DeliveryForm({ savedAddresses, isLoggedIn }: DeliveryFormProps) {
   const router = useRouter();
   const items = useCartStore((state) => state.items);
-  const clearCart = useCartStore((state) => state.clearCart);
 
   // Sayfa ömrü boyunca sabit — her yeniden render'da veya çift tıklamada
   // DEĞİŞMEZ; bu sayede aynı gönderim tekrar denendiğinde sunucu aynı
@@ -226,6 +225,7 @@ export function DeliveryForm({ savedAddresses, isLoggedIn }: DeliveryFormProps) 
 
     const raw = {
       email: String(formData.get("email") ?? ""),
+      identityNumber: String(formData.get("identityNumber") ?? ""),
       shippingAddress: readAddressFromFormData(formData, ""),
       billingSameAsShipping: billingSameAsShippingValue,
       billingAddress: billingSameAsShippingValue
@@ -268,8 +268,39 @@ export function DeliveryForm({ savedAddresses, isLoggedIn }: DeliveryFormProps) 
       return { fieldErrors: {}, formError: result.message };
     }
 
-    clearCart();
-    router.push(`/siparis-sonucu/${result.orderNumber}?t=${result.resultAccessToken}`);
+    if (result.paymentPageUrl) {
+      const paymentUrl = new URL(result.paymentPageUrl);
+
+      if (
+        paymentUrl.protocol !== "https:" ||
+        !(
+          paymentUrl.hostname === "iyzipay.com" ||
+          paymentUrl.hostname.endsWith(".iyzipay.com") ||
+          paymentUrl.hostname === "iyzico.com" ||
+          paymentUrl.hostname.endsWith(".iyzico.com")
+        )
+      ) {
+        return {
+          fieldErrors: {},
+          formError: "Ödeme sayfası adresi doğrulanamadı.",
+        };
+      }
+
+      sessionStorage.setItem(
+        "ossa_pending_order_result",
+        `/siparis-sonucu/${encodeURIComponent(result.orderNumber)}?t=${encodeURIComponent(result.resultAccessToken)}`,
+      );
+
+      window.location.assign(paymentUrl.toString());
+      return { fieldErrors: {}, formError: null };
+    }
+
+    // `paymentPageUrl` YOK ama sonuç başarılı: ödeme zaten alınmış (tekrar
+    // tahsilat yapılmadı) veya online ödeme kapalı. Her iki durumda da
+    // müşteri sipariş sonucuna gider — hata gösterilmez.
+    router.push(
+      `/siparis-sonucu/${encodeURIComponent(result.orderNumber)}?t=${encodeURIComponent(result.resultAccessToken)}`,
+    );
     return { fieldErrors: {}, formError: null };
   }
 
@@ -349,6 +380,34 @@ export function DeliveryForm({ savedAddresses, isLoggedIn }: DeliveryFormProps) 
 
       <section className={sectionClassName}>
         <h2 className="text-foreground text-base font-bold">Fatura Bilgileri</h2>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="identityNumber" className={labelClassName}>
+            T.C. Kimlik Numarası
+          </label>
+          <input
+            id="identityNumber"
+            name="identityNumber"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={11}
+            required
+            aria-invalid={Boolean(state.fieldErrors.identityNumber)}
+            aria-describedby={
+              state.fieldErrors.identityNumber ? "identityNumber-error" : undefined
+            }
+            className={inputClassName(Boolean(state.fieldErrors.identityNumber))}
+          />
+          {state.fieldErrors.identityNumber ? (
+            <p id="identityNumber-error" className={fieldErrorClassName}>
+              {state.fieldErrors.identityNumber}
+            </p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            Ödeme işleminin gerçekleştirilmesi için gereklidir.
+          </p>
+        </div>
 
         <div className="flex gap-3">
           <PillRadio

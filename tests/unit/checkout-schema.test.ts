@@ -17,6 +17,7 @@ function baseAddress() {
 function baseRaw(overrides: Record<string, unknown> = {}) {
   return {
     email: "test@ossa-test.local",
+    identityNumber: "12345678901",
     shippingAddress: baseAddress(),
     billingSameAsShipping: true,
     invoice: { invoiceType: "INDIVIDUAL" as const },

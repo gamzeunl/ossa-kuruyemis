@@ -1,6 +1,10 @@
 "use server";
 
 import { z } from "zod";
+import {
+  OrderAlreadyPaidError,
+  startIyzicoCheckout,
+} from "@/server/payments/iyzico-checkout-service";
 import { InvoiceType } from "@/generated/prisma/client";
 import { mapCheckoutFieldsToAddressInput } from "@/lib/checkout-address-mapping";
 import { checkoutSchema } from "@/lib/checkout-schema";
@@ -18,7 +22,7 @@ import { sendOrderEmail } from "@/server/services/order-email-service";
 import { getShippingSettings } from "@/server/services/site-setting-service";
 
 export type CheckoutActionResult =
-  | { ok: true; orderNumber: string; resultAccessToken: string }
+  | { ok: true; orderNumber: string; resultAccessToken: string; paymentPageUrl?: string }
   | { ok: false; message: string };
 
 interface CheckoutItemInput {
@@ -66,6 +70,13 @@ export async function createOrderAction(
   items: CheckoutItemInput[],
   idempotencyKey: string,
 ): Promise<CheckoutActionResult> {
+  if (process.env.IYZICO_CHECKOUT_ENABLED !== "true") {
+    return {
+      ok: false,
+      message: "Online ödeme sistemi geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
+    };
+  }
+
   // Girişsiz kullanıcı da sipariş verebilir (misafir siparişi) — kimlik erken
   // çözülür ki hız sınırlama anahtarı (userId varsa onunla, yoksa IP ile)
   // gerçek doğrulama/DB işinden ÖNCE uygulanabilsin.
@@ -82,6 +93,7 @@ export async function createOrderAction(
 
   const raw = {
     email: String(formData.get("email") ?? ""),
+    identityNumber: String(formData.get("identityNumber") ?? ""),
     shippingAddress: readAddressFromFormData(formData, ""),
     billingSameAsShipping,
     billingAddress: billingSameAsShipping ? undefined : readAddressFromFormData(formData, "billing_"),
@@ -171,6 +183,54 @@ export async function createOrderAction(
         await createAddress(user.id, mapCheckoutFieldsToAddressInput(parsed.data.shippingAddress));
       } catch {
         // Sipariş zaten oluşturuldu — adres kaydı hatası akışı bozmaz.
+      }
+    }
+
+    if (process.env.IYZICO_CHECKOUT_ENABLED === "true") {
+      try {
+        const checkout = await startIyzicoCheckout(
+          result.orderId,
+          result.resultAccessToken,
+          parsed.data.identityNumber,
+        );
+
+        if (!checkout.paymentPageUrl) {
+          return {
+            ok: false,
+            message: "Ödeme sayfası oluşturulamadı. Siparişiniz kaydedildi; lütfen tekrar sipariş oluşturmayın.",
+          };
+        }
+
+        return {
+          ok: true,
+          orderNumber: result.orderNumber,
+          resultAccessToken: result.resultAccessToken,
+          paymentPageUrl: checkout.paymentPageUrl,
+        };
+      } catch (error) {
+        // Ödeme zaten alınmış: ikinci kez tahsil ETMEDEN müşteriyi sipariş
+        // sonucuna yönlendir (`paymentPageUrl` yok → form zaten ödeme
+        // sayfasına göndermez, sonucu gösterir).
+        if (error instanceof OrderAlreadyPaidError) {
+          return {
+            ok: true,
+            orderNumber: result.orderNumber,
+            resultAccessToken: result.resultAccessToken,
+          };
+        }
+
+        // Hatanın yutulması bu entegrasyonun teşhis edilmesini imkânsız
+        // kılıyordu — müşteriye genel mesaj gider, gerçek neden sunucu
+        // loguna yazılır (kart/kişisel veri İÇERMEZ, bkz. CLAUDE.md).
+        console.error("[iyzico] Ödeme başlatılamadı", {
+          orderNumber: result.orderNumber,
+          reason: error instanceof Error ? error.message : "Bilinmeyen hata",
+        });
+
+        return {
+          ok: false,
+          message: "Ödeme başlatılamadı. Siparişiniz kaydedilmiş olabilir; lütfen tekrar sipariş oluşturmayın.",
+        };
       }
     }
 

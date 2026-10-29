@@ -1,7 +1,11 @@
+
 "use client";
 
 import { useActionState } from "react";
-import { createFeaturedPickAction, updateFeaturedPickAction } from "@/actions/admin-featured-picks";
+import {
+  createFeaturedPickAction,
+  updateFeaturedPickAction,
+} from "@/actions/admin-featured-picks";
 
 export interface FeaturedPickAdminFormValues {
   productId: string;
@@ -12,7 +16,6 @@ export interface FeaturedPickAdminFormValues {
 }
 
 interface FeaturedPickAdminFormProps {
-  /** Belirtilmemişse "yeni kayıt" (oluşturma) modu, belirtilmişse düzenleme modu. */
   pickId?: string;
   initialValues: FeaturedPickAdminFormValues;
   productOptions: { id: string; name: string }[];
@@ -25,25 +28,39 @@ interface FormState {
 
 const initialState: FormState = { message: null, success: false };
 
-const labelClassName = "text-foreground text-sm font-medium flex flex-col gap-1.5";
+const labelClassName =
+  "text-foreground flex flex-col gap-1.5 text-sm font-medium";
+
 const inputClassName =
   "border-border-muted focus:border-brand w-full rounded-lg border bg-white px-3.5 py-2.5 text-sm outline-none transition-colors";
 
-export function FeaturedPickAdminForm({ pickId, initialValues, productOptions }: FeaturedPickAdminFormProps) {
-  async function action(_prevState: FormState, formData: FormData): Promise<FormState> {
+export function FeaturedPickAdminForm({
+  pickId,
+  initialValues,
+  productOptions,
+}: FeaturedPickAdminFormProps) {
+
+  async function action(
+    _prevState: FormState,
+    formData: FormData
+  ): Promise<FormState> {
     const result = pickId
       ? await updateFeaturedPickAction(pickId, formData)
       : await createFeaturedPickAction(formData);
+
     return result.ok
       ? { message: "Kaydedildi.", success: true }
       : { message: result.message, success: false };
   }
 
-  const [state, formAction, isPending] = useActionState(action, initialState);
+  const [state, formAction, isPending] = useActionState(
+    action,
+    initialState
+  );
 
   return (
     <form action={formAction} noValidate className="flex flex-col gap-5">
-      {state.message ? (
+      {state.message && (
         <div
           role={state.success ? "status" : "alert"}
           className={`rounded-lg border px-4 py-3 text-sm ${
@@ -54,11 +71,16 @@ export function FeaturedPickAdminForm({ pickId, initialValues, productOptions }:
         >
           {state.message}
         </div>
-      ) : null}
+      )}
 
       <label className={labelClassName}>
         Ürün
-        <select name="productId" required defaultValue={initialValues.productId} className={inputClassName}>
+        <select
+          name="productId"
+          required
+          defaultValue={initialValues.productId}
+          className={inputClassName}
+        >
           <option value="" disabled>
             Ürün seçin
           </option>
@@ -72,7 +94,7 @@ export function FeaturedPickAdminForm({ pickId, initialValues, productOptions }:
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className={labelClassName}>
-          Başlangıç Tarihi <span className="text-foreground/40 font-normal">(isteğe bağlı)</span>
+          Başlangıç Tarihi
           <input
             name="startsAt"
             type="datetime-local"
@@ -80,8 +102,9 @@ export function FeaturedPickAdminForm({ pickId, initialValues, productOptions }:
             className={inputClassName}
           />
         </label>
+
         <label className={labelClassName}>
-          Bitiş Tarihi <span className="text-foreground/40 font-normal">(isteğe bağlı)</span>
+          Bitiş Tarihi
           <input
             name="endsAt"
             type="datetime-local"
@@ -102,8 +125,13 @@ export function FeaturedPickAdminForm({ pickId, initialValues, productOptions }:
             className={inputClassName}
           />
         </label>
+
         <label className="text-foreground flex items-center gap-2 text-sm font-medium sm:self-end sm:pb-2.5">
-          <input type="checkbox" name="isActive" defaultChecked={initialValues.isActive} />
+          <input
+            type="checkbox"
+            name="isActive"
+            defaultChecked={initialValues.isActive}
+          />
           Aktif
         </label>
       </div>
@@ -111,7 +139,7 @@ export function FeaturedPickAdminForm({ pickId, initialValues, productOptions }:
       <button
         type="submit"
         disabled={isPending}
-        className="bg-brand hover:bg-brand-dark w-fit min-h-11 rounded-full px-6 text-sm font-bold text-brand-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+        className="bg-brand hover:bg-brand-dark min-h-11 w-fit rounded-full px-6 text-sm font-bold text-brand-foreground transition-colors disabled:opacity-60"
       >
         {isPending ? "Kaydediliyor…" : "Kaydet"}
       </button>

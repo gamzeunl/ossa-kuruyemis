@@ -53,6 +53,10 @@ export type InvoiceSchema = z.infer<typeof invoiceSchema>;
 export const checkoutSchema = z
   .object({
     email: z.email("Geçerli bir e-posta adresi girin.").trim(),
+    identityNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{11}$/, "T.C. kimlik numarası 11 haneli olmalıdır."),
     shippingAddress: addressSchema,
     billingSameAsShipping: z.boolean(),
     billingAddress: addressSchema.optional(),

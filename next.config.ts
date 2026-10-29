@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["iyzipay"],
   reactStrictMode: true,
   // `/kargo-ve-teslimat` ve `/iade-ve-degisim` `/teslimat-iade` altında
   // birleştirildi (bkz. src/content/legal/teslimat-iade.ts) — eski linkler

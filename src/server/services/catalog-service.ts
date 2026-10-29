@@ -1,3 +1,8 @@
+import {
+  resolveVariantPricingWithCampaign,
+  type CampaignPriceCandidate,
+} from "@/lib/marketing-campaign-pricing";
+import { listCampaignPricesForVariants } from "@/server/repositories/marketing-campaign-repository";
 import { cache } from "react";
 import {
   findActiveCategoryBySlug,
@@ -82,9 +87,16 @@ function computeStockStatus(inventory: VariantRow["inventory"]): StockStatus {
  * tek kaynak) tek geçişte çözer. `computeMinPrice`/`pickDefaultVariant` bu sonucu
  * yeniden hesaplamadan kullanır.
  */
-export function resolveVariants(rows: VariantRow[]): ResolvedVariant[] {
+export function resolveVariants(
+  rows: VariantRow[],
+  campaignPrices: CampaignPriceCandidate[] = [],
+): ResolvedVariant[] {
   return rows.map((row) => {
-    const pricing = resolveVariantPricing(row);
+    const pricing = resolveVariantPricingWithCampaign(
+  row.id,
+  row,
+  campaignPrices,
+);
     const stockStatus = computeStockStatus(row.inventory);
     const summary: ProductVariantSummary = {
       id: row.id,
@@ -144,8 +156,12 @@ export function computeMinPrice(resolved: ResolvedVariant[]): string | null {
   return cheapest.pricing.effectivePrice.toString();
 }
 
-function toProductSummary(row: ProductListRow, bestSellerIds: ReadonlySet<string>): ProductSummary {
-  const resolved = resolveVariants(row.variants);
+function toProductSummary(
+  row: ProductListRow,
+  bestSellerIds: ReadonlySet<string>,
+  campaignPrices: CampaignPriceCandidate[] = [],
+): ProductSummary {
+  const resolved = resolveVariants(row.variants, campaignPrices);
   const primaryImage = row.images[0];
   const hasActiveDiscount = resolved.some((entry) => entry.summary.hasActiveDiscount);
   return {
@@ -168,8 +184,12 @@ function toProductSummary(row: ProductListRow, bestSellerIds: ReadonlySet<string
   };
 }
 
-function toProductDetail(row: ProductDetailRow, bestSellerIds: ReadonlySet<string>): ProductDetail {
-  const resolved = resolveVariants(row.variants);
+function toProductDetail(
+  row: ProductDetailRow,
+  bestSellerIds: ReadonlySet<string>,
+  campaignPrices: CampaignPriceCandidate[] = [],
+): ProductDetail {
+  const resolved = resolveVariants(row.variants, campaignPrices);
   const primaryImage = row.images.find((image) => image.isPrimary) ?? row.images[0];
   const hasActiveDiscount = resolved.some((entry) => entry.summary.hasActiveDiscount);
 
@@ -281,8 +301,14 @@ export async function listProducts(
     listPublishedProducts(options),
     getBestSellerIdSet(),
   ]);
-  return {
-    items: rows.map((row) => toProductSummary(row, bestSellerIds)),
+  const campaignPrices = await listCampaignPricesForVariants(
+  rows.flatMap((row) => row.variants.map((variant) => variant.id)),
+);
+
+return {
+  items: rows.map((row) =>
+    toProductSummary(row, bestSellerIds, campaignPrices)
+  ),
     total,
     page,
     pageSize,
@@ -295,7 +321,11 @@ export async function listProducts(
  * seçenekleriyle aynı sıralamayla döner. Fiyat sıralaması, mevcut
  * `computeMinPrice` ile aynı Decimal-güvenli, indirim-farkında mantığı kullanır.
  */
-function sortProductRows(rows: ProductListRow[], sort: ProductSortOption): ProductListRow[] {
+function sortProductRows(
+  rows: ProductListRow[],
+  sort: ProductSortOption,
+  campaignPrices: CampaignPriceCandidate[] = [],
+): ProductListRow[] {
   const sorted = [...rows];
 
   switch (sort) {
@@ -312,8 +342,9 @@ function sortProductRows(rows: ProductListRow[], sort: ProductSortOption): Produ
     case "price-desc": {
       const direction = sort === "price-asc" ? 1 : -1;
       sorted.sort((a, b) => {
-        const priceA = Number(computeMinPrice(resolveVariants(a.variants)) ?? Infinity);
-        const priceB = Number(computeMinPrice(resolveVariants(b.variants)) ?? Infinity);
+        const priceA = Number(computeMinPrice(resolveVariants(a.variants, campaignPrices)) ?? Infinity);
+        const priceB = Number(computeMinPrice(resolveVariants(b.variants, campaignPrices)) ?? Infinity);
+        
         return (priceA - priceB) * direction;
       });
       break;
@@ -361,14 +392,20 @@ export async function listProductsByGroup(params: {
   const matchedRows = categoryRows.filter((row) =>
     normalizedNames.has(normalizeProductName(row.name)),
   );
-  const sortedRows = sortProductRows(matchedRows, params.sort);
+  const campaignPrices = await listCampaignPricesForVariants(
+  matchedRows.flatMap((row) => row.variants.map((variant) => variant.id)),
+);
+
+const sortedRows = sortProductRows(matchedRows, params.sort, campaignPrices);
 
   const total = sortedRows.length;
   const start = (params.page - 1) * params.pageSize;
   const pageRows = sortedRows.slice(start, start + params.pageSize);
 
   return {
-    items: pageRows.map((row) => toProductSummary(row, bestSellerIds)),
+    items: pageRows.map((row) =>
+  toProductSummary(row, bestSellerIds, campaignPrices)
+),
     total,
     page: params.page,
     pageSize: params.pageSize,
@@ -382,7 +419,15 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | nu
     findPublishedProductBySlug(slug),
     getBestSellerIdSet(),
   ]);
-  return row ? toProductDetail(row, bestSellerIds) : null;
+  if (!row) {
+  return null;
+}
+
+const campaignPrices = await listCampaignPricesForVariants(
+  row.variants.map((variant) => variant.id),
+);
+
+return toProductDetail(row, bestSellerIds, campaignPrices);
 }
 
 /**
@@ -395,7 +440,13 @@ export async function getProductSummariesByIds(ids: string[]): Promise<ProductSu
     return [];
   }
   const [rows, bestSellerIds] = await Promise.all([listProductsByIds(ids), getBestSellerIdSet()]);
-  return rows.map((row) => toProductSummary(row, bestSellerIds));
+  const campaignPrices = await listCampaignPricesForVariants(
+  rows.flatMap((row) => row.variants.map((variant) => variant.id)),
+);
+
+return rows.map((row) =>
+  toProductSummary(row, bestSellerIds, campaignPrices),
+);
 }
 
 /** Ürünün birincil kategorisinden, kendisi hariç, sınırlı sayıda benzer ürün döner. */
@@ -411,8 +462,11 @@ export async function getRelatedProducts(
   return items.filter((item) => item.id !== product.id).slice(0, limit);
 }
 
-function toProductSearchSuggestion(row: ProductSearchRow): ProductSearchSuggestion {
-  const resolved = resolveVariants(row.variants);
+function toProductSearchSuggestion(
+  row: ProductSearchRow,
+  campaignPrices: CampaignPriceCandidate[] = [],
+): ProductSearchSuggestion {
+  const resolved = resolveVariants(row.variants, campaignPrices);
   const primaryImage = row.images[0];
   return {
     id: row.id,
@@ -467,7 +521,15 @@ export async function searchProductSuggestions(
     .filter((entry): entry is { row: ProductSearchRow; rank: number } => entry.rank !== null)
     .sort((a, b) => a.rank - b.rank);
 
-  return ranked.slice(0, limit).map((entry) => toProductSearchSuggestion(entry.row));
+  const selectedRows = ranked.slice(0, limit).map((entry) => entry.row);
+
+const campaignPrices = await listCampaignPricesForVariants(
+  selectedRows.flatMap((row) => row.variants.map((variant) => variant.id)),
+);
+
+return selectedRows.map((row) =>
+  toProductSearchSuggestion(row, campaignPrices),
+);
 }
 
 /** Gerçek satış verisinden çok satan ürünleri (satış adedine göre azalan) sınırlı sayıda döner. */
@@ -476,7 +538,13 @@ export async function getBestSellingProducts(limit: number): Promise<ProductSumm
   // `Set` iterasyon sırası ekleme sırasını (= satış adedine göre azalan) korur.
   const orderedIds = [...bestSellerIds].slice(0, limit);
   const rows = await listProductsByIds(orderedIds);
-  return rows.map((row) => toProductSummary(row, bestSellerIds));
+  const campaignPrices = await listCampaignPricesForVariants(
+  rows.flatMap((row) => row.variants.map((variant) => variant.id)),
+);
+
+return rows.map((row) =>
+  toProductSummary(row, bestSellerIds, campaignPrices),
+);
 }
 
 /**
@@ -510,22 +578,40 @@ export async function getBestSellingProductsWithQuantity(limit: number): Promise
 }
 
 /** Öne çıkan (`isFeatured`) ürünleri sınırlı sayıda döner. */
+
 export async function getFeaturedProducts(limit: number): Promise<ProductSummary[]> {
   const [rows, bestSellerIds] = await Promise.all([
     listFeaturedProducts({ limit }),
     getBestSellerIdSet(),
   ]);
-  return rows.map((row) => toProductSummary(row, bestSellerIds));
+
+  const campaignPrices = await listCampaignPricesForVariants(
+    rows.flatMap((row) => row.variants.map((variant) => variant.id)),
+  );
+
+  return rows.map((row) =>
+    toProductSummary(row, bestSellerIds, campaignPrices),
+  );
 }
 
+
 /** "OSSA Öneriyor" (`isRecommended`) işaretli ürünleri sınırlı sayıda döner. İşaretli ürün yoksa boş dizi döner. */
+
 export async function getRecommendedProducts(limit: number): Promise<ProductSummary[]> {
   const [rows, bestSellerIds] = await Promise.all([
     listRecommendedProducts({ limit }),
     getBestSellerIdSet(),
   ]);
-  return rows.map((row) => toProductSummary(row, bestSellerIds));
+
+  const campaignPrices = await listCampaignPricesForVariants(
+    rows.flatMap((row) => row.variants.map((variant) => variant.id)),
+  );
+
+  return rows.map((row) =>
+    toProductSummary(row, bestSellerIds, campaignPrices),
+  );
 }
+
 
 /**
  * "Kaçırılmayacak Fırsatlar" — gerçekten aktif indirimi olan ürünler. Aday

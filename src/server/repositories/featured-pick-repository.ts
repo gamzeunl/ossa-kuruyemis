@@ -51,6 +51,7 @@ export async function findFeaturedPickById(id: string): Promise<AdminFeaturedPic
   return prisma.featuredProductPick.findUnique({ where: { id }, select: adminFeaturedPickSelect });
 }
 
+
 export interface FeaturedPickFields {
   productId: string;
   sortOrder: number;
@@ -58,6 +59,7 @@ export interface FeaturedPickFields {
   endsAt: Date | null;
   isActive: boolean;
 }
+
 
 export async function createFeaturedPick(input: FeaturedPickFields): Promise<AdminFeaturedPickRow> {
   return prisma.featuredProductPick.create({ data: input, select: adminFeaturedPickSelect });

@@ -164,3 +164,28 @@ export function validateVariantDiscountUpdate(
 
   return { ok: true, discountPrice };
 }
+
+export function applyCampaignPrice(
+  pricing: ResolvedVariantPricing,
+  campaignPrice: Prisma.Decimal | null,
+): ResolvedVariantPricing {
+  if (
+    campaignPrice === null ||
+    !campaignPrice.greaterThan(0) ||
+    !campaignPrice.lessThan(pricing.effectivePrice)
+  ) {
+    return pricing;
+  }
+
+  const discountPercentage = Math.round(
+    (1 - campaignPrice.toNumber() / pricing.regularPrice.toNumber()) * 100,
+  );
+
+  return {
+    regularPrice: pricing.regularPrice,
+    effectivePrice: campaignPrice,
+    discountPrice: campaignPrice,
+    discountPercentage,
+    hasActiveDiscount: true,
+  };
+}

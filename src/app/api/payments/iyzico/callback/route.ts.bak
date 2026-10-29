@@ -1,0 +1,22 @@
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+export async function POST(request: Request) {
+  const formData = await request.formData().catch(() => null);
+  const token = formData?.get("token");
+
+  if (typeof token !== "string" || !token.trim()) {
+    return NextResponse.json(
+      { error: "Geçersiz ödeme bildirimi." },
+      { status: 400 },
+    );
+  }
+
+  // Güvenlik: Callback bildirimi tek başına ödeme kanıtı değildir.
+  // iyzico API doğrulaması tamamlanana kadar sipariş güncellenmez.
+  return NextResponse.json(
+    { error: "Ödeme doğrulama işlemi henüz etkin değil." },
+    { status: 503 },
+  );
+}

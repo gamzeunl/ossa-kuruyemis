@@ -55,6 +55,7 @@ export const INVOICE_TYPE_LABELS: Record<InvoiceType, string> = {
 };
 
 export const ORDER_EMAIL_TYPE_LABELS: Record<OrderEmailType, string> = {
+  ADMIN_NEW_ORDER: "Yeni Sipariş (Mağaza Bildirimi)",
   ORDER_RECEIVED: "Sipariş Alındı",
   STATUS_CONFIRMED: "Onaylandı",
   STATUS_PROCESSING: "Hazırlanıyor",
@@ -64,6 +65,8 @@ export const ORDER_EMAIL_TYPE_LABELS: Record<OrderEmailType, string> = {
 };
 
 export const EMAIL_SEND_STATUS_LABELS: Record<EmailSendStatus, string> = {
+  PENDING: "Bekliyor",
+  SENDING: "Gönderiliyor",
   SENT: "Gönderildi",
   FAILED: "Başarısız",
 };
